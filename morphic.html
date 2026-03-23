@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MORPHIC</title>
+<style>
+* { margin: 0; padding: 0 }
+body { background: #000; overflow: hidden; width: 100vw; height: 100vh }
+canvas { display: block }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+const cv = document.getElementById('c');
+const g  = cv.getContext('2d');
+let W, H, OX, OY, R;
+
+const resize = () => {
+  W = cv.width  = innerWidth;
+  H = cv.height = innerHeight;
+  OX = W / 2; OY = H / 2;
+  R  = Math.min(W, H) * 0.45;
+};
+resize();
+addEventListener('resize', resize);
+
+const TAU = Math.PI * 2;
+const hsl = (h, s = 70, l = 55, a = 1) =>
+  `hsla(${((h % 360) + 360) % 360},${s}%,${l}%,${a})`;
+
+g.lineCap  = 'round';
+g.lineJoin = 'round';
+
+/* ── polygon helpers ─────────────────────────────────────── */
+function polyVerts(cx, cy, r, n, rot) {
+  const v = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU + rot;
+    v.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+  }
+  return v;
+}
+
+function strokePoly(verts, color, lw) {
+  g.beginPath();
+  g.moveTo(verts[0][0], verts[0][1]);
+  for (let i = 1; i < verts.length; i++) g.lineTo(verts[i][0], verts[i][1]);
+  g.closePath();
+  g.strokeStyle = color;
+  g.lineWidth   = lw;
+  g.stroke();
+}
+
+/* ── hypotrochoid ────────────────────────────────────────── */
+function hypo(theta, A, B, C) {
+  return [
+    OX + (A - B) * Math.cos(theta) + C * Math.cos(((A - B) / B) * theta),
+    OY + (A - B) * Math.sin(theta) - C * Math.sin(((A - B) / B) * theta)
+  ];
+}
+
+/* ── second spirograph (epitrochoid) ────────────────────── */
+function epi(theta, A, B, C) {
+  return [
+    OX + (A + B) * Math.cos(theta) - C * Math.cos(((A + B) / B) * theta),
+    OY + (A + B) * Math.sin(theta) - C * Math.sin(((A + B) / B) * theta)
+  ];
+}
+
+/* ── state ───────────────────────────────────────────────── */
+let t  = 0;
+let s1 = 0;   // hypotrochoid time
+let s2 = 0;   // epitrochoid time
+
+const RINGS      = 10;
+const BASE_SPEED = 0.007;
+
+/* ── lissajous layer ─────────────────────────────────────── */
+function lissajousPoint(theta, ax, ay, dx, dy) {
+  return [
+    OX + R * ax * Math.sin(ax * theta + dx),
+    OY + R * ay * Math.sin(ay * theta + dy)
+  ];
+}
+
+let lT = 0;
+
+/* ── draw ────────────────────────────────────────────────── */
+function frame() {
+  t  += 0.0048;
+  s1 += 0.050;
+  s2 += 0.038;
+  lT += 0.022;
+
+  /* ── FADE ── */
+  g.fillStyle = 'rgba(0,0,8,0.11)';
+  g.fillRect(0, 0, W, H);
+
+  /* ══ LAYER 1 — SPIROGRAPH TRAILS ═══════════════════════ */
+  {
+    // hypotrochoid — parameters drift slowly
+    const A1  = R * 0.78;
+    const B1  = R * (0.160 + 0.065 * Math.sin(t * 0.07));
+    const C1  = R * (0.58  + 0.26  * Math.sin(t * 0.05));
+    const hue = t * 18;
+    const BURST = 12;
+    for (let s = 0; s < BURST; s++) {
+      const theta = s1 + s * 0.006;
+      const [px, py] = hypo(theta, A1, B1, C1);
+      const dist = Math.hypot(px - OX, py - OY) / R;
+      g.beginPath();
+      g.arc(px, py, 1.4, 0, TAU);
+      g.fillStyle = hsl(hue + s * 3, 92, 58 + 24 * dist, 0.80);
+      g.fill();
+    }
+  }
+
+  {
+    // epitrochoid — offset hue, opposite direction feel
+    const A2  = R * 0.30;
+    const B2  = R * (0.08 + 0.04 * Math.sin(t * 0.09));
+    const C2  = R * (0.38 + 0.18 * Math.sin(t * 0.06));
+    const hue = t * 22 + 180;
+    const BURST = 10;
+    for (let s = 0; s < BURST; s++) {
+      const theta = s2 + s * 0.007;
+      const [px, py] = epi(theta, A2, B2, C2);
+      const dist = Math.hypot(px - OX, py - OY) / R;
+      g.beginPath();
+      g.arc(px, py, 1.1, 0, TAU);
+      g.fillStyle = hsl(hue + s * 5, 88, 55 + 20 * dist, 0.65);
+      g.fill();
+    }
+  }
+
+  /* ══ LAYER 2 — LISSAJOUS FIGURE ════════════════════════ */
+  {
+    const ax = 0.40 + 0.04 * Math.sin(t * 0.11);
+    const ay = 0.38 + 0.04 * Math.cos(t * 0.09);
+    const dx = t * 0.12;
+    const dy = t * 0.08 + Math.PI / 3;
+    const hue = t * 30 + 90;
+    const STEPS = 320;
+    g.beginPath();
+    for (let i = 0; i <= STEPS; i++) {
+      const theta = (i / STEPS) * TAU * 9;
+      const [px, py] = lissajousPoint(theta, ax, ay, dx, dy);
+      i === 0 ? g.moveTo(px, py) : g.lineTo(px, py);
+    }
+    g.strokeStyle = hsl(hue, 75, 58, 0.18);
+    g.lineWidth   = 0.9;
+    g.stroke();
+  }
+
+  /* ══ LAYER 3 — POLYGON RINGS ════════════════════════════ */
+  {
+    const sides = 3 + Math.round(2.4 + 2.3 * Math.sin(t * 0.14));
+
+    // Build all ring vertex arrays
+    const allVerts = [];
+    for (let i = 1; i <= RINGS; i++) {
+      const ri    = (i / RINGS) * R * 0.91;
+      const dir   = i % 2 === 0 ? 1 : -1;
+      const speed = BASE_SPEED * (0.75 + (RINGS - i) * 0.16);
+      const rot   = t * dir * speed;
+      allVerts.push(polyVerts(OX, OY, ri, sides, rot));
+    }
+
+    // Connectors (drawn first, below rings)
+    for (let i = 0; i < RINGS - 1; i++) {
+      const hue = (t * 20 + i * (360 / RINGS)) % 360;
+      const v1  = allVerts[i];
+      const v2  = allVerts[i + 1];
+      g.strokeStyle = hsl(hue + 25, 60, 52, 0.16);
+      g.lineWidth   = 0.55;
+      for (let v = 0; v < sides; v++) {
+        g.beginPath();
+        g.moveTo(v1[v][0], v1[v][1]);
+        g.lineTo(v2[v][0], v2[v][1]);
+        g.stroke();
+      }
+    }
+
+    // Ring outlines + glow
+    for (let i = 0; i < RINGS; i++) {
+      const hue   = (t * 20 + (i + 1) * (360 / RINGS)) % 360;
+      const alpha = 0.48 + 0.38 * Math.sin(t * 1.3 + i * 0.85);
+      const lw    = 0.9 + 0.8 * Math.sin(t * 2.1 + i);
+
+      // wide glow
+      strokePoly(allVerts[i], hsl(hue, 100, 80, alpha * 0.20), 6);
+      // crisp outline
+      strokePoly(allVerts[i], hsl(hue, 84, 62, alpha), lw);
+    }
+
+    // Cross-vertex "spoke web" — connect vertex i of ring k to vertex (i+1) of ring k+3
+    const skip = 3;
+    if (RINGS > skip) {
+      for (let i = 0; i < RINGS - skip; i++) {
+        const hue = (t * 18 + i * 40) % 360;
+        const v1  = allVerts[i];
+        const v2  = allVerts[i + skip];
+        g.strokeStyle = hsl(hue, 50, 48, 0.09);
+        g.lineWidth   = 0.5;
+        for (let v = 0; v < sides; v++) {
+          const v2idx = (v + 1) % sides;
+          g.beginPath();
+          g.moveTo(v1[v][0],      v1[v][1]);
+          g.lineTo(v2[v2idx][0],  v2[v2idx][1]);
+          g.stroke();
+        }
+      }
+    }
+  }
+
+  /* ══ LAYER 4 — RADIAL SPOKES ════════════════════════════ */
+  {
+    const spokes = 18;
+    for (let i = 0; i < spokes; i++) {
+      const a   = (i / spokes) * TAU + t * 0.030;
+      const hue = (t * 26 + i * 20) % 360;
+      g.beginPath();
+      g.moveTo(OX, OY);
+      g.lineTo(OX + R * 1.04 * Math.cos(a), OY + R * 1.04 * Math.sin(a));
+      g.strokeStyle = hsl(hue, 55, 50, 0.085);
+      g.lineWidth   = 0.8;
+      g.stroke();
+    }
+  }
+
+  /* ══ LAYER 5 — CENTRAL STAR MANDALA ═════════════════════ */
+  {
+    const baseHue = (t * 38) % 360;
+    const LAYERS  = 4;
+    const PETALS  = 7;
+    const pulse   = 1 + 0.20 * Math.sin(t * 2.0);
+
+    for (let lay = 0; lay < LAYERS; lay++) {
+      const rOut  = R * (0.120 - lay * 0.024) * pulse;
+      const rIn   = rOut * 0.38;
+      const rot   = t * (lay % 2 === 0 ? 0.60 : -0.60) + lay * (Math.PI / PETALS);
+      const hue   = (baseHue + lay * 45) % 360;
+      const alpha = 0.88 - lay * 0.15;
+
+      g.beginPath();
+      for (let p = 0; p <= PETALS * 2; p++) {
+        const a = (p / (PETALS * 2)) * TAU + rot;
+        const r = p % 2 === 0 ? rOut : rIn;
+        p === 0
+          ? g.moveTo(OX + r * Math.cos(a), OY + r * Math.sin(a))
+          : g.lineTo(OX + r * Math.cos(a), OY + r * Math.sin(a));
+      }
+      g.closePath();
+      if (lay === 0) {
+        g.fillStyle = hsl(hue, 90, 44, 0.22);
+        g.fill();
+      }
+      // glow pass
+      g.strokeStyle = hsl(hue, 100, 80, alpha * 0.30);
+      g.lineWidth   = 4.5;
+      g.stroke();
+      // crisp pass
+      g.strokeStyle = hsl(hue, 100, 72, alpha);
+      g.lineWidth   = 1.4;
+      g.stroke();
+    }
+
+    // Inner spinning hexagram
+    for (let hex = 0; hex < 2; hex++) {
+      const rHex = R * 0.052 * pulse;
+      const rotH = t * (hex === 0 ? 1.1 : -1.1) + hex * (Math.PI / 6);
+      const hue  = (baseHue + hex * 180 + 30) % 360;
+      const v    = polyVerts(OX, OY, rHex, 3, rotH);
+      strokePoly(v, hsl(hue, 100, 82, 0.90), 1.6);
+    }
+
+    // Center radial bloom
+    const bloom = g.createRadialGradient(OX, OY, 0, OX, OY, R * 0.14 * pulse);
+    bloom.addColorStop(0,   hsl(baseHue,      100, 97, 0.90));
+    bloom.addColorStop(0.35, hsl(baseHue + 55, 100, 68, 0.50));
+    bloom.addColorStop(0.75, hsl(baseHue + 110, 80, 40, 0.18));
+    bloom.addColorStop(1,   'rgba(0,0,0,0)');
+    g.beginPath();
+    g.arc(OX, OY, R * 0.14 * pulse, 0, TAU);
+    g.fillStyle = bloom;
+    g.fill();
+
+    // Hard bright center dot
+    g.beginPath();
+    g.arc(OX, OY, 2.5, 0, TAU);
+    g.fillStyle = '#fff';
+    g.fill();
+  }
+
+  /* ══ LAYER 6 — OUTER RING PULSE ═════════════════════════ */
+  {
+    const hue1 = (t * 14 + 110) % 360;
+    const hue2 = (t * 14 + 290) % 360;
+    const rr   = R * (1.00 + 0.018 * Math.sin(t * 1.7));
+
+    g.beginPath();
+    g.arc(OX, OY, rr, 0, TAU);
+    g.strokeStyle = hsl(hue1, 60, 48, 0.14);
+    g.lineWidth   = 2;
+    g.stroke();
+
+    g.beginPath();
+    g.arc(OX, OY, rr * 0.97, 0, TAU);
+    g.strokeStyle = hsl(hue2, 50, 44, 0.08);
+    g.lineWidth   = 1;
+    g.stroke();
+  }
+
+  requestAnimationFrame(frame);
+}
+
+frame();
+</script>
+</body>
+</html>
